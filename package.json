@@ -2,7 +2,13 @@
   "name": "wdk-protocol-swap-uniswap-evm",
   "version": "1.0.0-beta.1",
   "description": "WDK module to make evm BIP-32 wallets interact with the uniswap swap protocol.",
-  "keywords": ["wdk", "protocol", "swap", "uniswap", "evm"],
+  "keywords": [
+    "wdk",
+    "protocol",
+    "swap",
+    "uniswap",
+    "evm"
+  ],
   "author": "Michael Mann &lt;michaelmann@murena.io&gt;",
   "license": "Apache-2.0",
   "main": "index.js",
@@ -17,7 +23,8 @@
   },
   "dependencies": {
     "@tetherto/wdk-wallet": "^1.0.0-beta.1",
-    "bare-node-runtime": "^1.1.4"
+    "bare-node-runtime": "^1.1.4",
+    "ethers": "^6.16.0"
   },
   "devDependencies": {
     "cross-env": "^7.0.3",
