@@ -49,8 +49,8 @@ const SWAP_ROUTER_ABI = [
 ]
 
 const QUOTER_ABI = [
-  'function quoteExactInputSingle((address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96)) returns (uint256 amountOut)',
-  'function quoteExactOutputSingle((address tokenIn, address tokenOut, uint24 fee, uint256 amountOut, uint160 sqrtPriceLimitX96)) returns (uint256 amountIn)'
+  'function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) external returns (uint256 amountOut)',
+  'function quoteExactOutputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountOut, uint160 sqrtPriceLimitX96) external returns (uint256 amountIn)'
 ]
 
 const ERC20_ABI = [
@@ -232,13 +232,9 @@ export default class UniswapProtocolEvm extends SwapProtocol {
         // Sell exact amount of tokenIn → estimate tokenOut
         const amountIn = BigInt(options.tokenInAmount)
 
-        const amountOut = await quoter.quoteExactInputSingle.staticCallResult({
-          tokenIn,
-          tokenOut,
-          fee: this._feeTier,
-          amountIn,
-          sqrtPriceLimitX96: 0
-        })
+        const amountOut = await quoter.quoteExactInputSingle.staticCallResult(
+          tokenIn, tokenOut, this._feeTier, amountIn, 0
+        )
 
         return {
           fee: 0n,
@@ -249,13 +245,9 @@ export default class UniswapProtocolEvm extends SwapProtocol {
         // Buy exact amount of tokenOut → estimate tokenIn needed
         const amountOut = BigInt(options.tokenOutAmount)
 
-        const amountIn = await quoter.quoteExactOutputSingle.staticCallResult({
-          tokenIn,
-          tokenOut,
-          fee: this._feeTier,
-          amountOut,
-          sqrtPriceLimitX96: 0
-        })
+        const amountIn = await quoter.quoteExactOutputSingle.staticCallResult(
+          tokenIn, tokenOut, this._feeTier, amountOut, 0
+        )
 
         return {
           fee: 0n,
