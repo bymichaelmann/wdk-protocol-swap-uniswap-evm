@@ -79,8 +79,8 @@ const SWAP_ROUTER_02_ABI = [
 ]
 
 const QUOTER_V2_ABI = [
-  'function quoteExactInput(bytes path, uint256 amountIn) external returns (uint256 amountOut, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)',
-  'function quoteExactOutput(bytes path, uint256 amountOut) external returns (uint256 amountIn, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)'
+  'function quoteExactInput(bytes path, uint256 amountIn) external view returns (uint256 amountOut, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)',
+  'function quoteExactOutput(bytes path, uint256 amountOut) external view returns (uint256 amountIn, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)'
 ]
 
 const ERC20_ABI = [
@@ -284,10 +284,10 @@ export default class UniswapProtocolEvm extends SwapProtocol {
         if (this._useV2) {
           const path = ethers.solidityPacked(['address', 'uint24', 'address'], [tokenIn, this._feeTier, tokenOut])
           const result = await quoter.quoteExactInput(path, amountIn)
-          amountOut = BigInt(result[0])
+          amountOut = result[0]
         } else {
           // QuoterV1 uses flat parameters
-          amountOut = await quoter.quoteExactInputSingle.staticCallResult(
+          amountOut = await quoter.quoteExactInputSingle.staticCall(
             tokenIn, tokenOut, this._feeTier, amountIn, 0
           )
         }
@@ -295,7 +295,7 @@ export default class UniswapProtocolEvm extends SwapProtocol {
         return {
           fee: 0n,
           tokenInAmount: amountIn,
-          tokenOutAmount: BigInt(amountOut[0])
+          tokenOutAmount: amountOut
         }
       } else {
         // Buy exact amount of tokenOut → estimate tokenIn needed
@@ -305,17 +305,17 @@ export default class UniswapProtocolEvm extends SwapProtocol {
         if (this._useV2) {
           const path = ethers.solidityPacked(['address', 'uint24', 'address'], [tokenIn, this._feeTier, tokenOut])
           const result = await quoter.quoteExactOutput(path, amountOut)
-          amountIn = BigInt(result[0])
+          amountIn = result[0]
         } else {
           // QuoterV1 uses flat parameters
-          amountIn = await quoter.quoteExactOutputSingle.staticCallResult(
+          amountIn = await quoter.quoteExactOutputSingle.staticCall(
             tokenIn, tokenOut, this._feeTier, amountOut, 0
           )
         }
 
         return {
           fee: 0n,
-          tokenInAmount: BigInt(amountIn[0]),
+          tokenInAmount: amountIn,
           tokenOutAmount: amountOut
         }
       }

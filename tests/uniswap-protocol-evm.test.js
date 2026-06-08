@@ -304,4 +304,126 @@ describe('UniswapProtocolEvm', () => {
       expect(protocol._getSigner()).toBeNull()
     })
   })
+
+  describe('V2 path (chainId=11155111)', () => {
+    test('quoteSwap exactInput with V2 path', async () => {
+      const amount = 500000n
+      const gasEstimate = 100000n
+      const encodedResult = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['uint256', 'uint160[]', 'uint32[]', 'uint256'],
+        [amount, [], [], gasEstimate]
+      )
+
+      const mockProvider = createMockProvider({
+        call: jest.fn().mockResolvedValue(encodedResult)
+      })
+      const account = createMockReadOnlyAccount({ call: mockProvider.call })
+      const protocol = new UniswapProtocolEvm(account, { chainId: 11155111 })
+
+      const quote = await protocol.quoteSwap({
+        tokenIn: TOKEN_IN,
+        tokenOut: TOKEN_OUT,
+        tokenInAmount: 1000000n
+      })
+
+      expect(quote.tokenInAmount).toBe(1000000n)
+      expect(quote.tokenOutAmount).toBe(amount)
+      expect(quote.fee).toBe(0n)
+      expect(quote.hash).toBeUndefined()
+    })
+
+    test('quoteSwap exactOutput with V2 path', async () => {
+      const amountIn = 2000000n
+      const gasEstimate = 100000n
+      const encodedResult = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['uint256', 'uint160[]', 'uint32[]', 'uint256'],
+        [amountIn, [], [], gasEstimate]
+      )
+
+      const mockProvider = createMockProvider({
+        call: jest.fn().mockResolvedValue(encodedResult)
+      })
+      const account = createMockReadOnlyAccount({ call: mockProvider.call })
+      const protocol = new UniswapProtocolEvm(account, { chainId: 11155111 })
+
+      const quote = await protocol.quoteSwap({
+        tokenIn: TOKEN_IN,
+        tokenOut: TOKEN_OUT,
+        tokenOutAmount: 1000000n
+      })
+
+      expect(quote.tokenInAmount).toBe(amountIn)
+      expect(quote.tokenOutAmount).toBe(1000000n)
+      expect(quote.fee).toBe(0n)
+      expect(quote.hash).toBeUndefined()
+    })
+
+    test('swap exactInput with V2 path', async () => {
+      const amount = 500000n
+      const gasEstimate = 100000n
+      const encodedResult = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['uint256', 'uint160[]', 'uint32[]', 'uint256'],
+        [amount, [], [], gasEstimate]
+      )
+
+      // Return tuple for quoter call, then large allowance for ERC20 check
+      const callMock = jest.fn()
+        .mockResolvedValueOnce(encodedResult)
+        .mockResolvedValue(encodeUint256(1000000000000000000000000n))
+
+      const mockProvider = createMockProvider({
+        call: callMock
+      })
+      const account = createMockAccount({ call: mockProvider.call })
+      const protocol = new UniswapProtocolEvm(account, { chainId: 11155111 })
+
+      const result = await protocol.swap({
+        tokenIn: TOKEN_IN,
+        tokenOut: TOKEN_OUT,
+        tokenInAmount: 1000000n
+      })
+
+      expect(result.hash).toBe('0xabc123')
+      expect(result.fee).toBe(100000n)
+      expect(result.tokenInAmount).toBe(1000000n)
+      expect(result.tokenOutAmount).toBe(amount)
+
+      // Verify the swap params pass through correctly
+      expect(callMock).toHaveBeenCalled()
+    })
+
+    test('swap exactOutput with V2 path', async () => {
+      const amountIn = 2000000n
+      const gasEstimate = 100000n
+      const encodedResult = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['uint256', 'uint160[]', 'uint32[]', 'uint256'],
+        [amountIn, [], [], gasEstimate]
+      )
+
+      // Return tuple for quoter call, then large allowance for ERC20 check
+      const callMock = jest.fn()
+        .mockResolvedValueOnce(encodedResult)
+        .mockResolvedValue(encodeUint256(1000000000000000000000000n))
+
+      const mockProvider = createMockProvider({
+        call: callMock
+      })
+      const account = createMockAccount({ call: mockProvider.call })
+      const protocol = new UniswapProtocolEvm(account, { chainId: 11155111 })
+
+      const result = await protocol.swap({
+        tokenIn: TOKEN_IN,
+        tokenOut: TOKEN_OUT,
+        tokenOutAmount: 1000000n
+      })
+
+      expect(result.hash).toBe('0xabc123')
+      expect(result.fee).toBe(100000n)
+      expect(result.tokenOutAmount).toBe(1000000n)
+      expect(result.tokenInAmount).toBe(amountIn)
+
+      // Verify the swap params pass through correctly
+      expect(callMock).toHaveBeenCalled()
+    })
+  })
 })
