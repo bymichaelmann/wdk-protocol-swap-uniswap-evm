@@ -34,15 +34,15 @@ const WETH_ADDRESSES = {
   10: '0x4200000000000000000000000000000000000006', // Optimism
   137: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270', // Polygon
   42161: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', // Arbitrum
-  11155111: '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14' // Sepolia
+  11155111: '0xfff9976782d46cc05630d1f6ebab18b2324d6b14' // Sepolia
 }
 
 /**
  * @type {Record<number, string>}
  */
 const QUOTER_V2_ADDRESSES = {
-  1: '0x61fFE014bA17989E743c5F6cE21d9690F0D11cF5',
-  11155111: '0x61fFE014bA17989E743c5F6cE21d9690F0D11cF5'
+  1: '0x61fFE014bA17989E743c5F6cE21bF9697530B21e',
+  11155111: '0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3'
 }
 
 /**
@@ -50,7 +50,7 @@ const QUOTER_V2_ADDRESSES = {
  */
 const SWAP_ROUTER_02_ADDRESSES = {
   1: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
-  11155111: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45'
+  11155111: '0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E'
 }
 
 /** @type {Set<number>} */
@@ -79,8 +79,8 @@ const SWAP_ROUTER_02_ABI = [
 ]
 
 const QUOTER_V2_ABI = [
-  'function quoteExactInputSingle((address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96)) external returns (uint256 amountOut)',
-  'function quoteExactOutputSingle((address tokenIn, address tokenOut, uint24 fee, uint256 amountOut, uint160 sqrtPriceLimitX96)) external returns (uint256 amountIn)'
+  'function quoteExactInput(bytes path, uint256 amountIn) external returns (uint256 amountOut, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)',
+  'function quoteExactOutput(bytes path, uint256 amountOut) external returns (uint256 amountIn, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)'
 ]
 
 const ERC20_ABI = [
@@ -282,14 +282,9 @@ export default class UniswapProtocolEvm extends SwapProtocol {
 
         let amountOut
         if (this._useV2) {
-          // QuoterV2 uses a struct parameter
-          amountOut = await quoter.quoteExactInputSingle.staticCallResult({
-            tokenIn,
-            tokenOut,
-            fee: this._feeTier,
-            amountIn,
-            sqrtPriceLimitX96: 0
-          })
+          const path = ethers.solidityPacked(['address', 'uint24', 'address'], [tokenIn, this._feeTier, tokenOut])
+          const result = await quoter.quoteExactInput(path, amountIn)
+          amountOut = BigInt(result[0])
         } else {
           // QuoterV1 uses flat parameters
           amountOut = await quoter.quoteExactInputSingle.staticCallResult(
@@ -308,14 +303,9 @@ export default class UniswapProtocolEvm extends SwapProtocol {
 
         let amountIn
         if (this._useV2) {
-          // QuoterV2 uses a struct parameter
-          amountIn = await quoter.quoteExactOutputSingle.staticCallResult({
-            tokenIn,
-            tokenOut,
-            fee: this._feeTier,
-            amountOut,
-            sqrtPriceLimitX96: 0
-          })
+          const path = ethers.solidityPacked(['address', 'uint24', 'address'], [tokenIn, this._feeTier, tokenOut])
+          const result = await quoter.quoteExactOutput(path, amountOut)
+          amountIn = BigInt(result[0])
         } else {
           // QuoterV1 uses flat parameters
           amountIn = await quoter.quoteExactOutputSingle.staticCallResult(
