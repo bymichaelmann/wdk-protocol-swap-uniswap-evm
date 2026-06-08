@@ -33,8 +33,28 @@ const WETH_ADDRESSES = {
   5: '0xB4FBF271143F4FBf7B91A5ded31805e42b2208d6', // Goerli
   10: '0x4200000000000000000000000000000000000006', // Optimism
   137: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270', // Polygon
-  42161: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1' // Arbitrum
+  42161: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', // Arbitrum
+  11155111: '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14' // Sepolia
 }
+
+/**
+ * @type {Record<number, string>}
+ */
+const QUOTER_V2_ADDRESSES = {
+  1: '0x61fFE014bA17989E743c5F6cE21d9690F0D11cF5',
+  11155111: '0x61fFE014bA17989E743c5F6cE21d9690F0D11cF5'
+}
+
+/**
+ * @type {Record<number, string>}
+ */
+const SWAP_ROUTER_02_ADDRESSES = {
+  1: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
+  11155111: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45'
+}
+
+/** @type {Set<number>} */
+const USE_V2_CHAIN_IDS = new Set([5, 11155111])
 
 const DEFAULT_SWAP_ROUTER = '0xE592427A0AEce92De3Edee1F18E0157C05861564'
 const DEFAULT_QUOTER = '0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6'
@@ -53,6 +73,16 @@ const QUOTER_ABI = [
   'function quoteExactOutputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountOut, uint160 sqrtPriceLimitX96) external returns (uint256 amountIn)'
 ]
 
+const SWAP_ROUTER_02_ABI = [
+  'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)',
+  'function exactOutputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountOut, uint256 amountInMaximum, uint160 sqrtPriceLimitX96)) payable returns (uint256 amountIn)'
+]
+
+const QUOTER_V2_ABI = [
+  'function quoteExactInputSingle((address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96)) external returns (uint256 amountOut)',
+  'function quoteExactOutputSingle((address tokenIn, address tokenOut, uint24 fee, uint256 amountOut, uint160 sqrtPriceLimitX96)) external returns (uint256 amountIn)'
+]
+
 const ERC20_ABI = [
   'function approve(address spender, uint256 amount) returns (bool)',
   'function allowance(address owner, address spender) view returns (uint256)',
@@ -66,6 +96,7 @@ const ERC20_ABI = [
  * @property {string} [swapRouter] - The Uniswap V3 SwapRouter address.
  * @property {string} [quoter] - The Uniswap V3 Quoter address.
  * @property {number} [feeTier] - The Uniswap V3 pool fee tier (default: 3000 = 0.30%).
+ * @property {boolean} [_useV2] - Read-only flag indicating whether V2 ABIs are active.
  */
 
 export default class UniswapProtocolEvm extends SwapProtocol {
@@ -98,6 +129,15 @@ export default class UniswapProtocolEvm extends SwapProtocol {
 
     /** @protected @type {string} */
     this._quoterAddress = config.quoter ?? DEFAULT_QUOTER
+
+    /** @protected @type {string} */
+    this._quoterAddressV2 = QUOTER_V2_ADDRESSES[this._chainId] ?? QUOTER_V2_ADDRESSES[1]
+
+    /** @protected @type {string} */
+    this._swapRouterAddress02 = SWAP_ROUTER_02_ADDRESSES[this._chainId] ?? SWAP_ROUTER_02_ADDRESSES[1]
+
+    /** @protected @type {boolean} */
+    this._useV2 = USE_V2_CHAIN_IDS.has(this._chainId)
 
     /** @protected @type {number} */
     this._feeTier = config.feeTier ?? DEFAULT_FEE_TIER
@@ -154,10 +194,14 @@ export default class UniswapProtocolEvm extends SwapProtocol {
    *
    * @protected
    * @param {import('ethers').Signer} [signer] - The signer to use for write operations.
+   * @param {boolean} [useV2=false] - Use the SwapRouter02 ABI and address.
    * @returns {import('ethers').Contract}
    */
-  _getSwapRouter (signer) {
+  _getSwapRouter (signer, useV2 = false) {
     const runner = signer ?? this._getSigner() ?? this._getProvider()
+    if (useV2) {
+      return new ethers.Contract(this._swapRouterAddress02, SWAP_ROUTER_02_ABI, runner)
+    }
     return new ethers.Contract(this._swapRouterAddress, SWAP_ROUTER_ABI, runner)
   }
 
@@ -166,10 +210,14 @@ export default class UniswapProtocolEvm extends SwapProtocol {
    *
    * @protected
    * @param {import('ethers').Provider} [provider] - The provider to use for reading.
+   * @param {boolean} [useV2=false] - Use the QuoterV2 ABI and address.
    * @returns {import('ethers').Contract}
    */
-  _getQuoter (provider) {
+  _getQuoter (provider, useV2 = false) {
     const runner = provider ?? this._getProvider()
+    if (useV2) {
+      return new ethers.Contract(this._quoterAddressV2, QUOTER_V2_ABI, runner)
+    }
     return new ethers.Contract(this._quoterAddress, QUOTER_ABI, runner)
   }
 
@@ -226,15 +274,28 @@ export default class UniswapProtocolEvm extends SwapProtocol {
     const isExactInput = options.tokenInAmount !== undefined && options.tokenInAmount !== null
 
     try {
-      const quoter = this._getQuoter(provider)
+      const quoter = this._getQuoter(provider, this._useV2)
 
       if (isExactInput) {
         // Sell exact amount of tokenIn → estimate tokenOut
         const amountIn = BigInt(options.tokenInAmount)
 
-        const amountOut = await quoter.quoteExactInputSingle.staticCallResult(
-          tokenIn, tokenOut, this._feeTier, amountIn, 0
-        )
+        let amountOut
+        if (this._useV2) {
+          // QuoterV2 uses a struct parameter
+          amountOut = await quoter.quoteExactInputSingle.staticCallResult({
+            tokenIn,
+            tokenOut,
+            fee: this._feeTier,
+            amountIn,
+            sqrtPriceLimitX96: 0
+          })
+        } else {
+          // QuoterV1 uses flat parameters
+          amountOut = await quoter.quoteExactInputSingle.staticCallResult(
+            tokenIn, tokenOut, this._feeTier, amountIn, 0
+          )
+        }
 
         return {
           fee: 0n,
@@ -245,9 +306,22 @@ export default class UniswapProtocolEvm extends SwapProtocol {
         // Buy exact amount of tokenOut → estimate tokenIn needed
         const amountOut = BigInt(options.tokenOutAmount)
 
-        const amountIn = await quoter.quoteExactOutputSingle.staticCallResult(
-          tokenIn, tokenOut, this._feeTier, amountOut, 0
-        )
+        let amountIn
+        if (this._useV2) {
+          // QuoterV2 uses a struct parameter
+          amountIn = await quoter.quoteExactOutputSingle.staticCallResult({
+            tokenIn,
+            tokenOut,
+            fee: this._feeTier,
+            amountOut,
+            sqrtPriceLimitX96: 0
+          })
+        } else {
+          // QuoterV1 uses flat parameters
+          amountIn = await quoter.quoteExactOutputSingle.staticCallResult(
+            tokenIn, tokenOut, this._feeTier, amountOut, 0
+          )
+        }
 
         return {
           fee: 0n,
@@ -297,7 +371,7 @@ export default class UniswapProtocolEvm extends SwapProtocol {
 
     // 3. Build swap calldata
     const deadline = this._getDeadline()
-    const router = this._getSwapRouter(signer)
+    const router = this._getSwapRouter(signer, this._useV2)
 
     let calldata
     let amountMinimum
@@ -305,33 +379,59 @@ export default class UniswapProtocolEvm extends SwapProtocol {
     if (isExactInput) {
       amountMinimum = 0n // accept any amount out (real apps should set a slippage tolerance)
 
-      calldata = router.interface.encodeFunctionData('exactInputSingle', [{
-        tokenIn,
-        tokenOut,
-        fee: this._feeTier,
-        recipient,
-        deadline,
-        amountIn: tokenInAmount,
-        amountOutMinimum: amountMinimum,
-        sqrtPriceLimitX96: 0
-      }])
+      if (this._useV2) {
+        // SwapRouter02 omits the deadline field
+        calldata = router.interface.encodeFunctionData('exactInputSingle', [{
+          tokenIn,
+          tokenOut,
+          fee: this._feeTier,
+          recipient,
+          amountIn: tokenInAmount,
+          amountOutMinimum: amountMinimum,
+          sqrtPriceLimitX96: 0
+        }])
+      } else {
+        calldata = router.interface.encodeFunctionData('exactInputSingle', [{
+          tokenIn,
+          tokenOut,
+          fee: this._feeTier,
+          recipient,
+          deadline,
+          amountIn: tokenInAmount,
+          amountOutMinimum: amountMinimum,
+          sqrtPriceLimitX96: 0
+        }])
+      }
     } else {
       amountMinimum = 0n // accept any amount in (real apps should set a slippage tolerance)
 
-      calldata = router.interface.encodeFunctionData('exactOutputSingle', [{
-        tokenIn,
-        tokenOut,
-        fee: this._feeTier,
-        recipient,
-        deadline,
-        amountOut: tokenOutAmount,
-        amountInMaximum: tokenInAmount,
-        sqrtPriceLimitX96: 0
-      }])
+      if (this._useV2) {
+        // SwapRouter02 omits the deadline field
+        calldata = router.interface.encodeFunctionData('exactOutputSingle', [{
+          tokenIn,
+          tokenOut,
+          fee: this._feeTier,
+          recipient,
+          amountOut: tokenOutAmount,
+          amountInMaximum: tokenInAmount,
+          sqrtPriceLimitX96: 0
+        }])
+      } else {
+        calldata = router.interface.encodeFunctionData('exactOutputSingle', [{
+          tokenIn,
+          tokenOut,
+          fee: this._feeTier,
+          recipient,
+          deadline,
+          amountOut: tokenOutAmount,
+          amountInMaximum: tokenInAmount,
+          sqrtPriceLimitX96: 0
+        }])
+      }
     }
 
     const tx = {
-      to: this._swapRouterAddress,
+      to: this._useV2 ? this._swapRouterAddress02 : this._swapRouterAddress,
       value: 0n,
       data: calldata
     }
@@ -353,17 +453,19 @@ export default class UniswapProtocolEvm extends SwapProtocol {
     if (!isNativeETH) {
       const owner = await this._account.getAddress()
 
+      const routerAddress = this._useV2 ? this._swapRouterAddress02 : this._swapRouterAddress
+
       try {
         // Encode the allowance call and use provider.call() directly
         const erc20Interface = new ethers.Interface(ERC20_ABI)
-        const allowanceData = erc20Interface.encodeFunctionData('allowance', [owner, this._swapRouterAddress])
+        const allowanceData = erc20Interface.encodeFunctionData('allowance', [owner, routerAddress])
         const result = await provider.call({ to: tokenIn, data: allowanceData })
         const [allowance] = erc20Interface.decodeFunctionResult('allowance', result)
 
         if (allowance < tokenInAmount) {
           // Use signer-based contract for the approve transaction
           const signerContract = this._getERC20Contract(tokenIn, signer)
-          const approveTx = await signerContract.approve(this._swapRouterAddress, tokenInAmount)
+          const approveTx = await signerContract.approve(routerAddress, tokenInAmount)
           await approveTx.wait()
         }
       } catch (/** @type {any} */ err) {
