@@ -1,4 +1,4 @@
-// Copyright 2026 Michael Mann &lt;michaelmann@murena.io&gt;
+// Copyright 2026 Michael Mann &lt;michaelmann@disroot.org&gt;
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.

@@ -9,7 +9,7 @@
     "uniswap",
     "evm"
   ],
-  "author": "Michael Mann &lt;michaelmann@murena.io&gt;",
+  "author": "Michael Mann &lt;michaelmann@disroot.org&gt;",
   "license": "Apache-2.0",
   "main": "index.js",
   "type": "module",
