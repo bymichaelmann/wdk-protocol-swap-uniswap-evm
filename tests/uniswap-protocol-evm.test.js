@@ -53,7 +53,7 @@ function createMockReadOnlyAccount (providerOverrides = {}) {
 }
 
 /**
- * Creates a mock full wallet account (supports write operations).
+ * Creates a mock full wallet account with very large allowance (supports write operations).
  * @param {object} [providerOverrides]
  * @returns {object}
  */
@@ -75,7 +75,9 @@ function createMockAccount (providerOverrides = {}) {
     dispose: jest.fn(),
     _account: {
       provider,
-      getAddress: jest.fn().mockResolvedValue(ACCOUNT_ADDRESS)
+      getAddress: jest.fn().mockResolvedValue(ACCOUNT_ADDRESS),
+      getBalance: jest.fn().mockResolvedValue(1000000000000000000n),
+      sendTransaction: jest.fn().mockResolvedValue({ hash: '0xapprove', wait: jest.fn().mockResolvedValue({}) })
     }
   }
 }
@@ -270,6 +272,65 @@ describe('UniswapProtocolEvm', () => {
         tokenOut: TOKEN_OUT,
         tokenInAmount: 1000000n
       })).rejects.toThrow('UniswapV3: account is not connected to a provider')
+    })
+
+    test('uses slippage for exact input swap', async () => {
+      // Mock a realistic quote (500000 tokenOut for 1000000 tokenIn)
+      // plus very large allowance for the approval check
+      const callMock = jest.fn()
+        .mockResolvedValueOnce(encodeUint256(500000n)) // quote call: returns 500000 tokenOut
+        .mockResolvedValue(encodeUint256(ethers.MaxUint256)) // allowance: huge
+
+      const account = createMockAccount({ call: callMock })
+      const protocol = new UniswapProtocolEvm(account, { slippageBps: 50 })
+
+      const result = await protocol.swap({
+        tokenIn: TOKEN_IN,
+        tokenOut: TOKEN_OUT,
+        tokenInAmount: 1000000n
+      })
+
+      expect(result.hash).toBe('0xabc123')
+      expect(result.fee).toBe(100000n)
+      expect(result.tokenInAmount).toBe(1000000n)
+      expect(typeof result.tokenOutAmount).toBe('bigint')
+    })
+
+    test('uses slippage for exact output swap', async () => {
+      // Mock a realistic quote (2000000 tokenIn for 1000000 tokenOut)
+      // plus very large allowance for the approval check
+      const callMock = jest.fn()
+        .mockResolvedValueOnce(encodeUint256(2000000n)) // quote call: returns 2000000 tokenIn needed
+        .mockResolvedValue(encodeUint256(ethers.MaxUint256)) // allowance: huge
+
+      const account = createMockAccount({ call: callMock })
+      const protocol = new UniswapProtocolEvm(account, { slippageBps: 100 })
+
+      const result = await protocol.swap({
+        tokenIn: TOKEN_IN,
+        tokenOut: TOKEN_OUT,
+        tokenOutAmount: 1000000n
+      })
+
+      expect(result.hash).toBe('0xabc123')
+      expect(result.fee).toBe(100000n)
+      expect(result.tokenOutAmount).toBe(1000000n)
+      expect(typeof result.tokenInAmount).toBe('bigint')
+    })
+
+    test('handles WETH as ERC-20 (not native ETH)', async () => {
+      // Use WETH as tokenIn — should go through approval, not skip it
+      const account = createMockAccount()
+      const protocol = new UniswapProtocolEvm(account)
+
+      const result = await protocol.swap({
+        tokenIn: TOKEN_OUT, // WETH as tokenIn
+        tokenOut: TOKEN_IN,
+        tokenInAmount: 1000000n
+      })
+
+      expect(result.hash).toBe('0xabc123')
+      expect(result.tokenInAmount).toBe(1000000n)
     })
   })
 

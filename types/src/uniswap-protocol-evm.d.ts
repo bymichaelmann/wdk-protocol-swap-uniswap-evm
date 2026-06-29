@@ -5,6 +5,8 @@
  * @property {string} [swapRouter] - The Uniswap V3 SwapRouter address.
  * @property {string} [quoter] - The Uniswap V3 Quoter address.
  * @property {number} [feeTier] - The Uniswap V3 pool fee tier (default: 3000 = 0.30%).
+ * @property {number} [slippageBps] - Slippage tolerance in basis points (default: 0). 50 = 0.5%.
+ * @property {boolean} [_useV2] - Read-only flag indicating whether V2 ABIs are active.
  */
 export default class UniswapProtocolEvm extends SwapProtocol {
     /**
@@ -29,8 +31,16 @@ export default class UniswapProtocolEvm extends SwapProtocol {
     protected _swapRouterAddress: string;
     /** @protected @type {string} */
     protected _quoterAddress: string;
+    /** @protected @type {string} */
+    protected _quoterAddressV2: string;
+    /** @protected @type {string} */
+    protected _swapRouterAddress02: string;
+    /** @protected @type {boolean} */
+    protected _useV2: boolean;
     /** @protected @type {number} */
     protected _feeTier: number;
+    /** @protected @type {number} */
+    protected _slippageBps: number;
     /** @protected @type {string} */
     protected _wethAddress: string;
     /**
@@ -61,17 +71,19 @@ export default class UniswapProtocolEvm extends SwapProtocol {
      *
      * @protected
      * @param {import('ethers').Signer} [signer] - The signer to use for write operations.
+     * @param {boolean} [useV2=false] - Use the SwapRouter02 ABI and address.
      * @returns {import('ethers').Contract}
      */
-    protected _getSwapRouter(signer?: import("ethers").Signer): import("ethers").Contract;
+    protected _getSwapRouter(signer?: import("ethers").Signer, useV2?: boolean): import("ethers").Contract;
     /**
      * Creates an ethers Contract instance for the Uniswap V3 Quoter.
      *
      * @protected
      * @param {import('ethers').Provider} [provider] - The provider to use for reading.
+     * @param {boolean} [useV2=false] - Use the QuoterV2 ABI and address.
      * @returns {import('ethers').Contract}
      */
-    protected _getQuoter(provider?: import("ethers").Provider): import("ethers").Contract;
+    protected _getQuoter(provider?: import("ethers").Provider, useV2?: boolean): import("ethers").Contract;
     /**
      * Returns the deadline timestamp (30 minutes from now).
      *
@@ -117,5 +129,13 @@ export type UniswapProtocolConfig = {
      * - The Uniswap V3 pool fee tier (default: 3000 = 0.30%).
      */
     feeTier?: number;
+    /**
+     * - Slippage tolerance in basis points (default: 0). 50 = 0.5%.
+     */
+    slippageBps?: number;
+    /**
+     * - Read-only flag indicating whether V2 ABIs are active.
+     */
+    _useV2?: boolean;
 };
 import { SwapProtocol } from '@tetherto/wdk-wallet/protocols';

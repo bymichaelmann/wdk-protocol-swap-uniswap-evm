@@ -84,6 +84,7 @@ new UniswapProtocolEvm(account, config?)
   - `swapRouter` — Uniswap V3 SwapRouter contract address
   - `quoter` — Uniswap V3 Quoter contract address
   - `feeTier` — Uniswap V3 pool fee tier (default: `3000` = 0.30%)
+  - `slippageBps` — Slippage tolerance in basis points (default: `0`). Example: `50` = 0.5%.
   - `swapMaxFee` — Maximum allowed gas cost (in wei) — throws if exceeded
 
 #### Methods
@@ -129,17 +130,17 @@ const polygonProtocol = new UniswapProtocolEvm(account, {
 
 The module supports any EVM chain where Uniswap V3 is deployed. The WETH address is automatically resolved for:
 - Ethereum Mainnet (1)
-- Goerli (5)
 - Optimism (10)
 - Polygon (137)
 - Arbitrum (42161)
+- Sepolia (11155111)
 
 ## Important Notes
 
-- Tokens must be **ERC-20** compliant. Native ETH wrapping/unwrapping is not directly handled by this module.
+- Tokens must be **ERC-20** compliant. Native ETH wrapping/unwrapping is not directly handled by this module, but native ETH swaps (via the zero address) pass the value as `tx.value`.
 - This module uses **on-chain Uniswap V3 contracts** directly — no external API or indexer is required.
-- Slippage tolerance is set to 0% (no minimum output amount). For production use, consider setting a custom slippage by modifying the calldata.
 - Token approval for the SwapRouter is handled automatically when needed.
+- Slippage tolerance is configurable via the `slippageBps` option (0 = no slippage protection). For production swaps, a value of 50-100 bps (0.5%-1%) is recommended to prevent sandwich attacks.
 
 ## Development
 

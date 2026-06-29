@@ -30,7 +30,6 @@ import { SwapProtocol } from '@tetherto/wdk-wallet/protocols'
  */
 const WETH_ADDRESSES = {
   1: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // Ethereum Mainnet
-  5: '0xB4FBF271143F4FBf7B91A5ded31805e42b2208d6', // Goerli
   10: '0x4200000000000000000000000000000000000006', // Optimism
   137: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270', // Polygon
   42161: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', // Arbitrum
@@ -54,7 +53,7 @@ const SWAP_ROUTER_02_ADDRESSES = {
 }
 
 /** @type {Set<number>} */
-const USE_V2_CHAIN_IDS = new Set([5, 11155111])
+const USE_V2_CHAIN_IDS = new Set([11155111])
 
 const DEFAULT_SWAP_ROUTER = '0xE592427A0AEce92De3Edee1F18E0157C05861564'
 const DEFAULT_QUOTER = '0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6'
@@ -96,6 +95,7 @@ const ERC20_ABI = [
  * @property {string} [swapRouter] - The Uniswap V3 SwapRouter address.
  * @property {string} [quoter] - The Uniswap V3 Quoter address.
  * @property {number} [feeTier] - The Uniswap V3 pool fee tier (default: 3000 = 0.30%).
+ * @property {number} [slippageBps] - Slippage tolerance in basis points (default: 0). 50 = 0.5%.
  * @property {boolean} [_useV2] - Read-only flag indicating whether V2 ABIs are active.
  */
 
@@ -141,6 +141,9 @@ export default class UniswapProtocolEvm extends SwapProtocol {
 
     /** @protected @type {number} */
     this._feeTier = config.feeTier ?? DEFAULT_FEE_TIER
+
+    /** @protected @type {number} */
+    this._slippageBps = config.slippageBps ?? 0
 
     /** @protected @type {string} */
     this._wethAddress = WETH_ADDRESSES[this._chainId] ?? ''
@@ -244,14 +247,10 @@ export default class UniswapProtocolEvm extends SwapProtocol {
       return 0n
     }
 
-    try {
-      const gasEstimate = await provider.estimateGas(tx)
-      const feeData = await provider.getFeeData()
-      const gasPrice = feeData.gasPrice ?? 0n
-      return gasEstimate * gasPrice
-    } catch {
-      return 0n
-    }
+    const gasEstimate = await provider.estimateGas(tx)
+    const feeData = await provider.getFeeData()
+    const gasPrice = feeData.gasPrice ?? 0n
+    return gasEstimate * gasPrice
   }
 
   // ── Public API ───────────────────────────────────────────────────────────────
@@ -356,19 +355,31 @@ export default class UniswapProtocolEvm extends SwapProtocol {
       tokenOutAmount = BigInt(options.tokenOutAmount)
     }
 
-    // 2. Resolve recipient
+    // 2. Compute slippage-adjusted amounts
+    const slippageBps = BigInt(this._slippageBps)
+    let amountOutMinimum
+    let amountInMaximum
+
+    if (isExactInput) {
+      // Exact input: tokenOutAmount is the quoted output, apply slippage to get minimum acceptable
+      amountOutMinimum = tokenOutAmount - (tokenOutAmount * slippageBps) / 10000n
+      amountInMaximum = 0n // not used for exact-input swap params
+    } else {
+      // Exact output: tokenInAmount is the quoted input needed, apply slippage to get maximum acceptable
+      amountInMaximum = tokenInAmount + (tokenInAmount * slippageBps) / 10000n
+      amountOutMinimum = 0n // not used for exact-output swap params
+    }
+
+    // 3. Resolve recipient
     const recipient = options.to ?? await this._account.getAddress()
 
-    // 3. Build swap calldata
+    // 4. Build swap calldata
     const deadline = this._getDeadline()
     const router = this._getSwapRouter(signer, this._useV2)
 
     let calldata
-    let amountMinimum
 
     if (isExactInput) {
-      amountMinimum = 0n // accept any amount out (real apps should set a slippage tolerance)
-
       if (this._useV2) {
         // SwapRouter02 omits the deadline field
         calldata = router.interface.encodeFunctionData('exactInputSingle', [{
@@ -377,7 +388,7 @@ export default class UniswapProtocolEvm extends SwapProtocol {
           fee: this._feeTier,
           recipient,
           amountIn: tokenInAmount,
-          amountOutMinimum: amountMinimum,
+          amountOutMinimum,
           sqrtPriceLimitX96: 0
         }])
       } else {
@@ -388,13 +399,11 @@ export default class UniswapProtocolEvm extends SwapProtocol {
           recipient,
           deadline,
           amountIn: tokenInAmount,
-          amountOutMinimum: amountMinimum,
+          amountOutMinimum,
           sqrtPriceLimitX96: 0
         }])
       }
     } else {
-      amountMinimum = 0n // accept any amount in (real apps should set a slippage tolerance)
-
       if (this._useV2) {
         // SwapRouter02 omits the deadline field
         calldata = router.interface.encodeFunctionData('exactOutputSingle', [{
@@ -403,7 +412,7 @@ export default class UniswapProtocolEvm extends SwapProtocol {
           fee: this._feeTier,
           recipient,
           amountOut: tokenOutAmount,
-          amountInMaximum: tokenInAmount,
+          amountInMaximum,
           sqrtPriceLimitX96: 0
         }])
       } else {
@@ -414,36 +423,19 @@ export default class UniswapProtocolEvm extends SwapProtocol {
           recipient,
           deadline,
           amountOut: tokenOutAmount,
-          amountInMaximum: tokenInAmount,
+          amountInMaximum,
           sqrtPriceLimitX96: 0
         }])
       }
     }
 
-    const tx = {
-      to: this._useV2 ? this._swapRouterAddress02 : this._swapRouterAddress,
-      value: 0n,
-      data: calldata
-    }
+    const routerAddress = this._useV2 ? this._swapRouterAddress02 : this._swapRouterAddress
 
-    // 4. Check swapMaxFee
-    const swapMaxFee = this._config.swapMaxFee
-    if (swapMaxFee !== undefined && swapMaxFee !== null) {
-      const estimatedFee = await this._estimateFee(tx)
-      if (estimatedFee > BigInt(swapMaxFee)) {
-        throw new Error(`UniswapV3: swap fee (${estimatedFee}) exceeds max (${String(swapMaxFee)})`)
-      }
-    }
-
-    // 5. Handle token approval for non-native tokens
-    // Check if tokenIn is native ETH (zero address) — if so, skip approval
-    const isNativeETH = tokenIn === '0x0000000000000000000000000000000000000000' ||
-      (this._wethAddress && tokenIn.toLowerCase() === this._wethAddress.toLowerCase())
+    // 5. Handle token approval (skip only for native ETH — zero address)
+    const isNativeETH = tokenIn === '0x0000000000000000000000000000000000000000'
 
     if (!isNativeETH) {
       const owner = await this._account.getAddress()
-
-      const routerAddress = this._useV2 ? this._swapRouterAddress02 : this._swapRouterAddress
 
       try {
         // Encode the allowance call and use provider.call() directly
@@ -452,10 +444,13 @@ export default class UniswapProtocolEvm extends SwapProtocol {
         const result = await provider.call({ to: tokenIn, data: allowanceData })
         const [allowance] = erc20Interface.decodeFunctionResult('allowance', result)
 
-        if (allowance < tokenInAmount) {
+        // Approval must cover at least the maximum amount we might spend
+        const approvalNeeded = isExactInput ? tokenInAmount : amountInMaximum
+
+        if (allowance < approvalNeeded) {
           // Use signer-based contract for the approve transaction
           const signerContract = this._getERC20Contract(tokenIn, signer)
-          const approveTx = await signerContract.approve(routerAddress, tokenInAmount)
+          const approveTx = await signerContract.approve(routerAddress, approvalNeeded)
           await approveTx.wait()
         }
       } catch (/** @type {any} */ err) {
@@ -463,7 +458,22 @@ export default class UniswapProtocolEvm extends SwapProtocol {
       }
     }
 
-    // 6. Send the swap transaction
+    const tx = {
+      to: routerAddress,
+      value: isNativeETH ? tokenInAmount : 0n,
+      data: calldata
+    }
+
+    // 6. Check swapMaxFee (AFTER approval so allowance is in place for gas estimation)
+    const swapMaxFee = this._config.swapMaxFee
+    if (swapMaxFee !== undefined && swapMaxFee !== null) {
+      const estimatedFee = await this._estimateFee(tx)
+      if (estimatedFee > BigInt(swapMaxFee)) {
+        throw new Error(`UniswapV3: swap fee (${estimatedFee}) exceeds max (${String(swapMaxFee)})`)
+      }
+    }
+
+    // 7. Send the swap transaction
     let result
     try {
       result = await this._account.sendTransaction(tx)
@@ -471,7 +481,7 @@ export default class UniswapProtocolEvm extends SwapProtocol {
       throw new Error(`UniswapV3: swap transaction failed — ${err.message ?? err}`)
     }
 
-    // 7. Return result with actual amounts
+    // 8. Return result with actual amounts
     return {
       hash: result.hash,
       fee: result.fee,
