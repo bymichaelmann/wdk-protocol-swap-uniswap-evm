@@ -238,7 +238,7 @@ export default class UniswapProtocolEvm extends SwapProtocol {
    * Estimates the total gas cost for a swap transaction.
    *
    * @protected
-   * @param {{ to: string, value: bigint, data: string }} tx - The transaction to estimate.
+   * @param {{ to: string, value: bigint, data: string, from?: string }} tx - The transaction to estimate.
    * @returns {Promise<bigint>} The estimated fee in wei.
    */
   async _estimateFee (tx) {
@@ -247,7 +247,9 @@ export default class UniswapProtocolEvm extends SwapProtocol {
       return 0n
     }
 
-    const gasEstimate = await provider.estimateGas(tx)
+    // Include the sender address so eth_estimateGas does not revert on Sepolia (and other chains)
+    const txWithFrom = { ...tx, from: await this._account.getAddress() }
+    const gasEstimate = await provider.estimateGas(txWithFrom)
     const feeData = await provider.getFeeData()
     const gasPrice = feeData.gasPrice ?? 0n
     return gasEstimate * gasPrice
@@ -305,6 +307,18 @@ export default class UniswapProtocolEvm extends SwapProtocol {
           const path = ethers.solidityPacked(['address', 'uint24', 'address'], [tokenIn, this._feeTier, tokenOut])
           const result = await quoter.quoteExactOutput(path, amountOut)
           amountIn = result[0]
+
+          // Diagnostic: QuoterV2 quoteExactOutput on Sepolia is known to return garbage values
+          // (e.g. 2 wei instead of ~0.00005 WETH).  If the returned amountIn is suspiciously
+          // low (< 100 wei) while the requested amountOut is much larger, log a warning.
+          // See https://github.com/Uniswap/v3-periphery/issues/472
+          if (amountIn < 100n && amountOut > 100n) {
+            console.warn(
+              `UniswapV3: quoteExactOutput returned suspiciously low amountIn (${amountIn} wei) ` +
+              `for amountOut (${amountOut} wei). The QuoterV2 on chain ${this._chainId} may have ` +
+              'a bug with exactOutput quotes. Consider using exactInput quotes instead.'
+            )
+          }
         } else {
           // QuoterV1 uses flat parameters
           amountIn = await quoter.quoteExactOutputSingle.staticCall(
